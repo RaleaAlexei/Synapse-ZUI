@@ -1,7 +1,7 @@
-# Synapse-Z UI (OLD READ DESC) 
+# Synapse-Z UI (Rewritten for performance and stability)
 
-Hey everyone, thank you for using my UI. This was a great learning experience for me, I am now working on a new version of my UI, this UI will no longer be updated, however it will continue to work completely fine if you choose to continue using it. 
-I will update you all when my new UI is ready to be used.
+Hey everyone, my name is Alex and I am obsessed with optimization, so I will maintain as much as I can this repo, some quality of life updates provide less ram usage (up to 386MB of RAM saved per 10 Tabs), less cpu usage and smoother experience.
+I am doing this out of my free time, feel free to support me on my paypal.
 
 A remake of Synapse X's 2022 UI in C# specifically made for the Syn-Z executor, completely open source for anyone to modify and create their own UIs with.
 
