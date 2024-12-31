@@ -32,7 +32,6 @@ namespace Synapse_Z
         private Point offset;
         private Process process;
         private Tab addTabButton;
-        private Microsoft.Web.WebView2.WinForms.WebView2 currentWebView2;
 
         private BackgroundWorker backgroundWorker;
         private System.Windows.Forms.Timer fadeInTimer;
@@ -40,6 +39,7 @@ namespace Synapse_Z
         private FileSystemWatcher fileSystemWatcher;
         private ScriptHub scriptHubFormInstance;
         private Options optionsFormInstance;
+        private TabManager tabManager;
 
         private const int HTLEFT = 10;
         private const int HTRIGHT = 11;
@@ -50,10 +50,6 @@ namespace Synapse_Z
         private const int HTBOTTOMLEFT = 16;
         private const int HTBOTTOMRIGHT = 17;
         private const int BorderWidth = 10;
-
-        private string webView2FolderPath;
-        private string tabsFolderPath;
-        private ContextMenuStrip tabContextMenu;
 
 
         private static readonly HttpClient client = new HttpClient();
@@ -106,9 +102,6 @@ namespace Synapse_Z
             InitializeComponent();
             InitializeBackgroundWorker();
             InitializeScriptContextMenu();
-            SetupWebView2Environment();
-            InitializeTabContextMenu(); // Initialize the tab context menu
-         
             ThemeManager.Instance.ApplyTheme(this);
 
             if (GlobalVariables.ShowVersion == true)
@@ -142,18 +135,6 @@ namespace Synapse_Z
             injTimer.Interval = 100;
             injTimer.Tick += InjTimer_Tick;
 
-            // Initialize tab control
-            tabControl1.Padding = new Padding(22, 4, 22, 4);
-            //tabControl1.BackColor = Color.FromArgb(61, 61, 61);
-            tabControl1.Dock = DockStyle.Fill;
-            tabControl1.ShowCloseTabButtons = true;
-            tabControl1.CloseTabButtonClick += tabControl1_CloseTabButtonClick;
-            tabControl1.TabClick += tabControl1_TabClick;
-            tabControl1.LayoutTabs += TabControl1_LayoutTabs;
-            tabControl1.PageChanged += tabControl1_PageChanged;
-            tabControl1.ForeColor = ThemeManager.Instance.GetThemeColor("SynapseZ.TabControl.ForeColor"); // Set tab text color to white
-            tabControl1.MouseUp += TabControl1_MouseUp; // Add MouseUp event for showing context menu
-
             this.Opacity = 0; // Set initial opacity to 0
 
             // Initialize and start the fade-in timer
@@ -180,17 +161,6 @@ namespace Synapse_Z
             {
                 Directory.CreateDirectory(binPath);
             }
-
-            // Ensure the tabs folder exists
-            tabsFolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lib", "tabs");
-            if (!Directory.Exists(tabsFolderPath))
-            {
-                Directory.CreateDirectory(tabsFolderPath);
-            }
-
-            // Load previously saved tabs
-            LoadSavedTabs();
-
             // Load scripts into Scriptbox
             LoadScriptsIntoScriptbox(scriptsPath);
 
@@ -206,14 +176,12 @@ namespace Synapse_Z
 
 
             CheckForUpdates();
-
-
         }
 
   
         private async void CheckForUpdates()
         {
-            string owner = "Coolmandfgfgdvcgfg"; // Replace with the repository owner's name
+            string owner = "RaleaAlexei"; // Replace with the repository owner's name
             string repo = "Synapse-ZUI"; // Replace with the repository name
 
             try
@@ -277,7 +245,6 @@ namespace Synapse_Z
             }
         }
 
-
         private void UpdateTopMost(bool topMost)
         {
             this.TopMost = topMost;
@@ -289,198 +256,16 @@ namespace Synapse_Z
             {
                 // Cancel the closing event
                 e.Cancel = true;
-           
                 // Save all tabs asynchronously
-                await SaveAllTabsAsync();
-
+                await tabManager.SaveAllTabsAsync();
                 if (GlobalVariables.noSave == false)
                 {
                     await GlobalVariables.SaveSettingsAsync();
                 }
-
-
                 // After saving, close the form
                 e.Cancel = false;
                 this.FormClosing -= SynapseZ_FormClosing; // Remove the event handler to avoid recursion
                 this.Close();
-            }
-        }
-
-        private async Task SaveAllTabsAsync()
-        {
-            foreach (Tab tab in tabControl1.Tabs)
-            {
-                if (tab != null && tab.Text != "+")
-                {
-                    Microsoft.Web.WebView2.WinForms.WebView2 webView = tab.Controls.OfType<Microsoft.Web.WebView2.WinForms.WebView2>().FirstOrDefault();
-                    if (webView != null && webView.CoreWebView2 != null)
-                    {
-                        string script = "GetText();";
-                        string result = await webView.CoreWebView2.ExecuteScriptAsync(script);
-                        if (!string.IsNullOrEmpty(result) && result != "null")
-                        {
-                            result = result.Trim('"');
-                            string unescapedString = Regex.Unescape(result);
-                            if (!string.IsNullOrWhiteSpace(unescapedString))
-                            {
-                                SaveTabContent(tab.Text, unescapedString, tab.Text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-
-        private async void ClearTabsMenuItem_Click(object sender, EventArgs e)
-        {
-            await Task.Delay(1); // Add a slight delay
-            if (GlobalVariables.TabClosingPrompt)
-            {
-                var result = MessageBox.Show($"Are you sure you want to close all tabs?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation);
-                if (result == DialogResult.Yes)
-                {
-                    ClearAllTabs();
-                    AddNewTab("Script 1");
-                }
-            }
-            else
-            {
-                ClearAllTabs();
-                AddNewTab("Script 1");
-            }
-        }
-
-        private async void ClearAllTabs()
-        {
-            // Collect all tabs except the add tab button
-            var tabsToRemove = tabControl1.Tabs.Where(tab => tab.Text != "+").ToList();
-
-            // Remove the collected tabs
-            foreach (var tab in tabsToRemove)
-            {
-                try
-                {
-                    tabControl1.Tabs.Remove(tab);
-                }
-                catch (ArgumentOutOfRangeException)
-                {
-                    // Ignore the error and continue
-                }
-            }
-            await Task.Delay(1); // Add a slight delay
-            // Clear all tab files
-            var tabFiles = Directory.GetFiles(tabsFolderPath, "*.json");
-            foreach (var tabFile in tabFiles)
-            {
-                File.Delete(tabFile);
-            }
-        }
-
-        private async void RenameTabMenuItem_Click(object sender, EventArgs e)
-        {
-            Tab selectedTab = tabControl1.SelectedTab;
-            if (selectedTab != null && selectedTab.Text != "+")
-            {
-                this.TopMost = false;
-                string currentName = selectedTab.Text;
-                string newName = Microsoft.VisualBasic.Interaction.InputBox("Enter new name for the tab (max 20 characters):", "Rename Tab", currentName);
-
-                if (!string.IsNullOrEmpty(newName) && newName.Length <= 20 && newName != currentName)
-                {
-                    this.TopMost = GlobalVariables.TopMostGlobal;
-                    // Ensure the new name is unique
-                    if (tabControl1.Tabs.Any(tab => tab.Text == newName))
-                    {
-                        MessageBox.Show("A tab with this name already exists. Please choose a different name.", "Rename Tab", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    }
-                    else
-                    {
-                        // Update the tab name
-                        selectedTab.Text = newName;
-
-                        // Update the saved file to reflect the new tab name
-                        string oldFileName = Path.Combine(tabsFolderPath, $"{currentName}.json");
-                        string newFileName = Path.Combine(tabsFolderPath, $"{newName}.json");
-
-                        if (File.Exists(oldFileName))
-                        {
-                            File.Move(oldFileName, newFileName);
-                        }
-
-                        // Save the tab content with the new name
-                        string content = await GetTabContentAsync(selectedTab);
-                        var tabData = new TabData { Name = newName, Content = content, FileName = newName };
-                        SaveTabContent(newName, tabData.Content, newName);
-
-                        // Move the renamed tab to the top
-                        tabControl1.Tabs.Remove(selectedTab);
-                        tabControl1.Tabs.Insert(0, selectedTab);
-                        tabControl1.SelectedTab = selectedTab;
-                    }
-                }
-                else if (newName.Length > 20)
-                {
-                    MessageBox.Show("The new tab name exceeds the 20-character limit. Please choose a shorter name.", "Rename Tab", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-            }
-        }
-
-        private async Task<string> GetTabContentAsync(Tab tab)
-        {
-            Microsoft.Web.WebView2.WinForms.WebView2 webView = tab.Controls.OfType<Microsoft.Web.WebView2.WinForms.WebView2>().FirstOrDefault();
-            if (webView != null && webView.CoreWebView2 != null)
-            {
-                string script = "GetText();";
-                string result = await webView.CoreWebView2.ExecuteScriptAsync(script);
-                if (!string.IsNullOrEmpty(result) && result != "null")
-                {
-                    result = result.Trim('"');
-                    return Regex.Unescape(result);
-                }
-            }
-            return string.Empty;
-        }
-
-        private void TabControl1_MouseUp(object sender, MouseEventArgs e)
-        {
-            if (e.Button == MouseButtons.Right)
-            {
-                for (int i = 0; i < tabControl1.Tabs.Count; i++)
-                {
-                    var tab = tabControl1.Tabs[i];
-                    Rectangle r = tabControl1.GetTabBounds(tab);
-                    if (r.Contains(e.Location))
-                    {
-                        tabControl1.SelectedIndex = i;
-                        tabContextMenu.Show(tabControl1, e.Location);
-                        break;
-                    }
-                }
-            }
-        }
-
-        private async void SaveTabMenuItem_Click(object sender, EventArgs e)
-        {
-            Tab selectedTab = tabControl1.SelectedTab;
-            if (selectedTab != null && selectedTab.Text != "+")
-            {
-                Microsoft.Web.WebView2.WinForms.WebView2 webView = selectedTab.Controls.OfType<Microsoft.Web.WebView2.WinForms.WebView2>().FirstOrDefault();
-                if (webView != null && webView.CoreWebView2 != null)
-                {
-                    string script = "GetText();";
-                    string result = await webView.CoreWebView2.ExecuteScriptAsync(script);
-                    if (!string.IsNullOrEmpty(result) && result != "null")
-                    {
-                        result = result.Trim('"');
-                        string unescapedString = Regex.Unescape(result);
-                        if (!string.IsNullOrWhiteSpace(unescapedString))
-                        {
-                            SaveTabContent(selectedTab.Text, unescapedString, selectedTab.Text);
-                            MessageBox.Show("Tab content saved successfully!", "Save Tab", MessageBoxButtons.OK, MessageBoxIcon.Information);
-                        }
-                    }
-                }
             }
         }
 
@@ -534,8 +319,6 @@ namespace Synapse_Z
             }
             base.WndProc(ref m);
         }
-
-
 
         private void Scriptbox_DrawItem(object sender, DrawItemEventArgs e)
         {
@@ -599,7 +382,7 @@ namespace Synapse_Z
 
                 // Load script into a new tab
                 string tabName = Path.GetFileNameWithoutExtension(filePath);
-                AddNewTab(tabName, fileContent);
+                tabManager.AddNewTab(tabName, fileContent);
             }
         }
 
@@ -622,7 +405,7 @@ namespace Synapse_Z
                 string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "scripts", Scriptbox.SelectedItem.ToString());
                 string fileContent = File.ReadAllText(filePath);
                 // Execute script functionality
-                string unescapedString = EscapeJavaScriptString(fileContent);
+                string unescapedString = WebViewManager.EscapeJavaScriptString(fileContent);
 
                 ExecuteForSelectedClients(unescapedString);
             }
@@ -654,8 +437,7 @@ namespace Synapse_Z
                 string filePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "scripts", Scriptbox.SelectedItem.ToString());
                 // Load script into editor functionality
                 var tabData = File.ReadAllText(filePath);
-                string script = $"SetText(`{EscapeJavaScriptString(tabData)}`);";
-                await currentWebView2.CoreWebView2.ExecuteScriptAsync(script);
+                tabManager.SetCurrentWebViewText(tabData);
             }
         }
 
@@ -757,18 +539,37 @@ namespace Synapse_Z
         private async void SynapseZ_Load(object sender, EventArgs e)
         {
 
+            var environment = await CoreWebView2Environment.CreateAsync(null, GlobalVariables.webView2FolderPath);
+            await mainWebView2.EnsureCoreWebView2Async(environment);
+            string ThemeFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "theme");
+            string editorFilePath = Path.Combine(ThemeFolder, "editor.html");
+            if (File.Exists(editorFilePath))
+            {
+                // Convert the path to the required format
+                GlobalVariables.CurrentEditorHTML = "file:///" + editorFilePath.Replace("\\", "/");
+                // Navigate to the editor HTML file or default Ace editor content if not found
+                mainWebView2.CoreWebView2.Navigate(GlobalVariables.CurrentEditorHTML);
+            }
+            else
+            {
+                // Load the default Ace editor content from embedded resources
+                GlobalVariables.CurrentEditorHTML = WebViewManager.GetEmbeddedHtmlContent("Synapse_Z.Resources.editor.html");
+                // Navigate to the editor HTML file or default Ace editor content if not found
+                mainWebView2.NavigateToString(GlobalVariables.CurrentEditorHTML);
+            }
             // Start the AutoInject task if AutoInject is true
             if (GlobalVariables.AutoInject)
             {
                 AutoInjectManager.StartAutoInjectTask();
             }
+            tabManager = new TabManager(this, tabControl1, mainWebView2);
 
             // Remove all existing tabs on load
             tabControl1.Tabs.Clear();
 
 
             // Add the initial "Add Tab" button
-            AddNewTabButton();
+            tabManager.AddNewTabButton();
 
             await Task.Run(ReInjectMissingPIDs);
 
@@ -816,7 +617,7 @@ namespace Synapse_Z
             var result = MessageBox.Show($"Are you sure you want to close {GlobalVariables.ExploitName}?", "Confirm Exit", MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation);
             if (result == DialogResult.Yes)
             {
-                Application.Exit();
+                Environment.Exit(0x0);
             }
         }
 
@@ -851,297 +652,6 @@ namespace Synapse_Z
             this.WindowState = FormWindowState.Minimized;
         }
 
-        private void SetupWebView2Environment()
-        {
-            // Define the folder path where WebView2 runtime files are located
-            webView2FolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lib", "WebView2Files");
-        }
-
-        private async void AddNewTab(string tabName = null, string tabContent = null, string fileName = null)
-        {
-            await Task.Delay(1); // Add a slight delay
-            int scriptNumber = tabControl1.Tabs.Count - 1;
-            string baseTabText = tabName ?? $"Script {scriptNumber + 1}";
-            string tabText = baseTabText;
-            int count = 1;
-
-            // Ensure the tab name is unique
-            while (tabControl1.Tabs.Any(tab => tab.Text == tabText))
-            {
-                tabText = $"{baseTabText} ({count})";
-                count++;
-            }
-
-            Color currentColor = tabControl1.BackColor;
-
-            // Add 8 to each RGB component, ensuring the values remain within the valid range (0-255)
-            int newRed = Math.Min(currentColor.R + 68, 255);
-            int newGreen = Math.Min(currentColor.G + 68, 255);
-            int newBlue = Math.Min(currentColor.B + 68, 255);
-
-            // Create a new Color with the updated RGB values
-            Color newColor = Color.FromArgb(newRed, newGreen, newBlue);
-
-            Tab newTab = new Tab
-            {
-                Text = tabText,
-                BackColor = newColor,
-                ForeColor = ThemeManager.Instance.GetThemeColor("SynapseZ.TabControl.ForeColor") // Set tab text color to white
-            };
-
-            // Add WebView2 control to the new tab
-            Microsoft.Web.WebView2.WinForms.WebView2 webView = new Microsoft.Web.WebView2.WinForms.WebView2
-            {
-                Dock = DockStyle.Fill
-            };
-            newTab.Controls.Add(webView);
-
-            tabControl1.Tabs.Insert(tabControl1.Tabs.Count - 1, newTab);
-            tabControl1.SelectedTab = newTab;
-
-            PositionAddTabButton();
-            currentWebView2 = webView;
-
-            var environment = await CoreWebView2Environment.CreateAsync(null, webView2FolderPath);
-            await webView.EnsureCoreWebView2Async(environment);
-            string ThemeFolder = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "theme");
-            string editorFilePath = Path.Combine(ThemeFolder, "editor.html");
-            if (File.Exists(editorFilePath))
-            {
-                // Convert the path to the required format
-                GlobalVariables.CurrentEditorHTML = "file:///" + editorFilePath.Replace("\\", "/");
-                // Navigate to the editor HTML file or default Ace editor content if not found
-                webView.CoreWebView2.Navigate(GlobalVariables.CurrentEditorHTML);
-            }
-            else
-            {
-                // Load the default Ace editor content from embedded resources
-                GlobalVariables.CurrentEditorHTML = GetEmbeddedHtmlContent("Synapse_Z.Resources.editor.html");
-                // Navigate to the editor HTML file or default Ace editor content if not found
-                webView.NavigateToString(GlobalVariables.CurrentEditorHTML);
-            }
-
-            webView.NavigationCompleted += async (sender, args) =>
-            {
-                if (webView.CoreWebView2 != null)
-                {
-
-                    // Set the text content if provided
-                    if (tabContent != null)
-                    {
-                        string scriptSetText = $"SetText(`{EscapeJavaScriptString(tabContent)}`);";
-                        await webView.CoreWebView2.ExecuteScriptAsync(scriptSetText);
-                    }
-                }
-                string scriptSetTheme = $"SetTheme('{GlobalVariables.CurrentEditorTheme}');";
-                await webView.CoreWebView2.ExecuteScriptAsync(scriptSetTheme);
-            };
-            
-            //MessageBox.Show(GlobalVariables.CurrentEditorTheme);
-        }
-
-
-        private string GetEmbeddedHtmlContent(string resourceName)
-        {
-            var assembly = Assembly.GetExecutingAssembly();
-            using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-            {
-                if (stream == null)
-                {
-                    throw new InvalidOperationException("Resource not found: " + resourceName);
-                }
-
-                using (StreamReader reader = new StreamReader(stream))
-                {
-                    string html = reader.ReadToEnd();
-                    html = EmbedJavaScriptContent(html);
-                    return html;
-                }
-            }
-        }
-
-        private string EmbedJavaScriptContent(string html)
-        {
-            html = html.Replace("src=\"ace.js\"", $"src=\"data:text/javascript;base64,{GetEmbeddedResourceBase64("Synapse_Z.Resources.ace.js")}\"");
-            html = html.Replace("src=\"ext-language_tools.js\"", $"src=\"data:text/javascript;base64,{GetEmbeddedResourceBase64("Synapse_Z.Resources.ext-language_tools.js")}\"");
-            html = html.Replace("src=\"mode-lua.js\"", $"src=\"data:text/javascript;base64,{GetEmbeddedResourceBase64("Synapse_Z.Resources.mode-lua.js")}\"");
-            return html;
-        }
-
-        private string GetEmbeddedResourceBase64(string resourceName)
-        {
-            var assembly = Assembly.GetExecutingAssembly();
-            using (Stream stream = assembly.GetManifestResourceStream(resourceName))
-            {
-                if (stream == null)
-                {
-                    throw new InvalidOperationException("Resource not found: " + resourceName);
-                }
-
-                using (MemoryStream ms = new MemoryStream())
-                {
-                    stream.CopyTo(ms);
-                    return Convert.ToBase64String(ms.ToArray());
-                }
-            }
-        }
-
-
-        private void AddNewTabButton()
-        {
-            Color currentColor = tabControl1.BackColor;
-
-            // Add 8 to each RGB component, ensuring the values remain within the valid range (0-255)
-            int newRed = Math.Min(currentColor.R + 8, 255);
-            int newGreen = Math.Min(currentColor.G + 8, 255);
-            int newBlue = Math.Min(currentColor.B + 8, 255);
-
-            // Create a new Color with the updated RGB values
-            Color newColor = Color.FromArgb(newRed, newGreen, newBlue);
-
-            addTabButton = new Tab
-            {
-                Text = "+",
-                BackColor = newColor,
-
-                ForeColor = ThemeManager.Instance.GetThemeColor("SynapseZ.TabControl.ForeColor"), // Set add button text color to white
-                Width = tabControl1.TabSize.Height, // Make the add button a perfect square
-                Height = tabControl1.TabSize.Height
-            };
-            tabControl1.Tabs.Add(addTabButton);
-        }
-
-        private void tabControl1_CloseTabButtonClick(object sender, CancelTabEventArgs e)
-        {
-            if (e.Tab.Text != "+" && tabControl1.Tabs.Count > 2) // Prevent deletion if only one tab is left
-            {
-                if (GlobalVariables.TabClosingPrompt)
-                {
-                    var result = MessageBox.Show($"Are you sure you want to close {e.Tab.Text}?", "Confirm", MessageBoxButtons.YesNo, MessageBoxIcon.Exclamation);
-                    if (result == DialogResult.Yes)
-                    {
-                        // Ensure only the selected tab is removed
-                        DeleteTabFile(e.Tab.Text); // Delete the corresponding JSON file
-                        e.Cancel = true;
-                        tabControl1.Tabs.Remove(e.Tab);
-                        PositionAddTabButton();
-                    }
-                    else
-                    {
-                        e.Cancel = true;
-                    }
-                }
-                else
-                {
-                    // Ensure only the selected tab is removed
-                    DeleteTabFile(e.Tab.Text); // Delete the corresponding JSON file
-                    e.Cancel = true;
-                    tabControl1.Tabs.Remove(e.Tab);
-                    PositionAddTabButton();
-                }
-            }
-            else
-            {
-                MessageBox.Show("You cannot delete the last tab!", "Error");
-                e.Cancel = true; // Cancel the tab close action to prevent removing the last tab
-            }
-        }
-
-        private void DeleteTabFile(string tabName)
-        {
-            var tabFiles = Directory.GetFiles(tabsFolderPath, "*.json");
-            foreach (var tabFile in tabFiles)
-            {
-                var tabData = JsonConvert.DeserializeObject<TabData>(File.ReadAllText(tabFile));
-                if (tabData.Name == tabName)
-                {
-                    File.Delete(tabFile);
-                    break;
-                }
-            }
-        }
-
-        private void tabControl1_TabClick(object sender, TabMouseEventArgs e)
-        {
-            if (e.Tab.Text == "+")
-            {
-                AddNewTab();
-            }
-        }
-
-        private void PositionAddTabButton()
-        {
-            // Ensure the add tab button is always the last tab
-            if (tabControl1.Tabs.Contains(addTabButton))
-            {
-                tabControl1.Tabs.Remove(addTabButton);
-                tabControl1.Tabs.Add(addTabButton);
-            }
-        }
-
-        private async void tabControl1_PageChanged(object sender, PageChangedEventArgs e)
-        {
-            // If the selected tab is the "Add Tab" button, switch to the newly created tab
-            if (e.OldPage != null && e.OldPage.Text == "+")
-            {
-                await Task.Delay(1); // Add a slight delay
-                var lastTab = tabControl1.Tabs[tabControl1.Tabs.Count - 2];
-                tabControl1.SelectedTab = lastTab;
-            }
-
-            // Update the current WebView2 based on the selected tab
-            if (tabControl1.SelectedTab != null)
-            {
-                currentWebView2 = tabControl1.SelectedTab.Controls.OfType<Microsoft.Web.WebView2.WinForms.WebView2>().FirstOrDefault();
-            }
-        }
-
-        private void LoadSavedTabs()
-        {
-            var tabFiles = Directory.GetFiles(tabsFolderPath, "*.json");
-            if (tabFiles.Length == 0)
-            {
-                AddNewTab("Script 1");
-            }
-            else
-            {
-                foreach (var tabFile in tabFiles)
-                {
-                    var tabData = JsonConvert.DeserializeObject<TabData>(File.ReadAllText(tabFile));
-                    AddNewTab(tabData.Name, tabData.Content);
-                }
-            }
-        }
-
-        private async void SaveTabContent(string tabName, string content, string fileName)
-        {
-            if (string.IsNullOrWhiteSpace(content)) return; // Don't save blank tabs
-
-            var tabData = new TabData { Name = tabName, Content = content, FileName = fileName };
-            var json = JsonConvert.SerializeObject(tabData, Formatting.Indented);
-            File.WriteAllText(Path.Combine(tabsFolderPath, $"{fileName}.json"), json);
-        }
-
-        private void InitializeTabContextMenu()
-        {
-            tabContextMenu = new ContextMenuStrip();
-
-            // Save Tab Menu Item
-            ToolStripMenuItem saveTabMenuItem = new ToolStripMenuItem("Save Tab");
-            saveTabMenuItem.Click += SaveTabMenuItem_Click;
-            tabContextMenu.Items.Add(saveTabMenuItem);
-
-            // Rename Tab Menu Item
-            ToolStripMenuItem renameTabMenuItem = new ToolStripMenuItem("Rename Tab");
-            renameTabMenuItem.Click += RenameTabMenuItem_Click;
-            tabContextMenu.Items.Add(renameTabMenuItem);
-
-            // Clear Tabs Menu Item
-            ToolStripMenuItem clearTabsMenuItem = new ToolStripMenuItem("Clear Tabs");
-            clearTabsMenuItem.Click += ClearTabsMenuItem_Click;
-            tabContextMenu.Items.Add(clearTabsMenuItem);
-        }
-
         private void FlatButton_MouseEnter(object sender, EventArgs e)
         {
             if (sender is Button button)
@@ -1157,11 +667,6 @@ namespace Synapse_Z
             {
                 button.FlatAppearance.BorderSize = 0;
             }
-        }
-
-        private void TabControl1_LayoutTabs(object sender, LayoutTabsEventArgs e)
-        {
-            // Custom layout logic for tabs, if needed
         }
 
         public string[] GetOtherExecutablePaths()
@@ -1271,32 +776,14 @@ namespace Synapse_Z
 
         private async void Execute_Click(object sender, EventArgs e)
         {
-            if (currentWebView2 != null && currentWebView2.CoreWebView2 != null)
+            if (mainWebView2 != null && mainWebView2.CoreWebView2 != null)
             {
                 try
                 {
-                    // Call the getText function defined in the HTML
-                    string script = "GetText();";
-
-                    // Execute the script
-                    string result = await currentWebView2.CoreWebView2.ExecuteScriptAsync(script);
-
+                    string script = await tabManager.ReadCurrentWebViewText();
+                    ExecuteForSelectedClients(script);
                     // Log the result for debugging
                     //MessageBox.Show("Script result: " + result);
-
-                    // Remove the enclosing quotes from the result if it's not null
-                    if (!string.IsNullOrEmpty(result) && result != "null")
-                    {
-
-                        result = result.Trim('"');
-                        string unescapedString = Regex.Unescape(result);
-                        // WebSocketServerManager.ExecuteScriptForUserId("243198651", unescapedString);
-                        ExecuteForSelectedClients(unescapedString);
-                    }
-                    else
-                    {
-                        MessageBox.Show("Element not found or script returned null.");
-                    }
                 }
                 catch (Exception ex)
                 {
@@ -1307,7 +794,7 @@ namespace Synapse_Z
 
         private async void Clear_Click(object sender, EventArgs e)
         {
-            if (currentWebView2 != null && currentWebView2.CoreWebView2 != null)
+            if (mainWebView2 != null && mainWebView2.CoreWebView2 != null)
             {
                 try
                 {
@@ -1320,7 +807,7 @@ namespace Synapse_Z
                             string script = "ClearText();";
 
                             // Execute the script
-                            await currentWebView2.CoreWebView2.ExecuteScriptAsync(script);
+                            await mainWebView2.CoreWebView2.ExecuteScriptAsync(script);
                         }
                     }
                     else
@@ -1329,7 +816,7 @@ namespace Synapse_Z
                         string script = "ClearText();";
 
                         // Execute the script
-                        await currentWebView2.CoreWebView2.ExecuteScriptAsync(script);
+                        await mainWebView2.CoreWebView2.ExecuteScriptAsync(script);
                     }
                 }
                 catch (Exception ex)
@@ -1641,7 +1128,6 @@ namespace Synapse_Z
             UpdateLabelText(FinishedExpTop);
         }
 
-
         void ClearBinFolder(string folderPath)
         {
             try
@@ -1819,12 +1305,12 @@ namespace Synapse_Z
                 string fileContent = File.ReadAllText(filePath);
 
                 // Execute the setText function on the current WebView2
-                if (currentWebView2 != null && currentWebView2.CoreWebView2 != null)
+                if (mainWebView2 != null && mainWebView2.CoreWebView2 != null)
                 {
                     try
                     {
-                        string script = $"SetText(`{EscapeJavaScriptString(fileContent)}`);";
-                        await currentWebView2.CoreWebView2.ExecuteScriptAsync(script);
+                        string script = $"SetText(`{WebViewManager.EscapeJavaScriptString(fileContent)}`);";
+                        await mainWebView2.CoreWebView2.ExecuteScriptAsync(script);
                     }
                     catch (Exception ex)
                     {
@@ -1838,15 +1324,11 @@ namespace Synapse_Z
             }
         }
 
-        // Helper method to escape special characters in the file content for JavaScript
-        private string EscapeJavaScriptString(string value)
-        {
-            return value.Replace("\\", "\\\\").Replace("`", "\\`").Replace("$", "\\$");
-        }
+        
 
         private async void SaveFile_Click(object sender, EventArgs e)
         {
-            if (currentWebView2 != null && currentWebView2.CoreWebView2 != null)
+            if (mainWebView2 != null && mainWebView2.CoreWebView2 != null)
             {
                 try
                 {
@@ -1854,7 +1336,7 @@ namespace Synapse_Z
                     string script = "GetText();";
 
                     // Execute the script
-                    string result = await currentWebView2.CoreWebView2.ExecuteScriptAsync(script);
+                    string result = await mainWebView2.CoreWebView2.ExecuteScriptAsync(script);
 
                     // Log the result for debugging
                     //MessageBox.Show("Script result: " + result);
@@ -1922,12 +1404,7 @@ namespace Synapse_Z
             }
         }
         // Class to hold tab data
-        private class TabData
-        {
-            public string Name { get; set; }
-            public string Content { get; set; }
-            public string FileName { get; set; }
-        }
+        
 
         private void Options_Click(object sender, EventArgs e)
         {
@@ -1964,11 +1441,11 @@ namespace Synapse_Z
                 string fileContent = File.ReadAllText(filePath);
 
                 // Execute the setText function on the current WebView2
-                if (currentWebView2 != null && currentWebView2.CoreWebView2 != null)
+                if (mainWebView2 != null && mainWebView2.CoreWebView2 != null)
                 {
                     try
                     {
-                        string script = EscapeJavaScriptString(fileContent);
+                        string script = WebViewManager.EscapeJavaScriptString(fileContent);
 
                         ExecuteForSelectedClients(script);
                     }

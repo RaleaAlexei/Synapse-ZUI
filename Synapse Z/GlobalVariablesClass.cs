@@ -1,5 +1,6 @@
 ﻿using System;
 using System.IO;
+using System.Security.Cryptography.X509Certificates;
 using System.Threading.Tasks;
 
 namespace Synapse_Z
@@ -147,6 +148,7 @@ namespace Synapse_Z
             }
         }
 
+        public static string webView2FolderPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "lib", "WebView2Files");
         private class Settings
         {
             public bool injecting { get; set; }
